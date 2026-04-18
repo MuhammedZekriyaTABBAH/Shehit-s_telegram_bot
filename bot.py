@@ -133,42 +133,55 @@ async def show_recent(message: types.Message):
 async def export_data(message: types.Message):
     """تصدير البيانات - للمسؤولين فقط"""
     if message.from_user.id not in ADMINS:
-        await message.answer("⛔ **غير مصرح**\nهذا الأمر متاح للمسؤولين فقط.", parse_mode=ParseMode.MARKDOWN)
+        await message.answer("⛔ غير مصرح")
         return
     
-    await message.answer("📊 **جاري تصدير البيانات...**", parse_mode=ParseMode.MARKDOWN)
+    await message.answer("📊 جاري التصدير...")
     
     try:
-        import pandas as pd
+        from openpyxl import Workbook
         from datetime import datetime
         
-        conn = db.connect()
-        df = pd.read_sql_query("SELECT * FROM people", conn)
-        conn.close()
+        # جلب البيانات من Supabase
+        results = db.get_recent_people(1000)  # جلب آخر 1000 شخص
         
-        if df.empty:
-            await message.answer("📭 لا توجد بيانات للتصدير.")
+        if not results:
+            await message.answer("📭 لا توجد بيانات")
             return
         
-        # تنظيف البيانات قبل التصدير
-        df = df.drop(columns=['created_by', 'id'], errors='ignore')
+        # إنشاء ملف Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "البيانات"
         
-        # إعادة تسمية الأعمدة
-        df.columns = ['اللقب', 'الاسم', 'سنة الميلاد', 'البلد', 'الاختصاص', 'سنة الوفاة', 'مكان الوفاة', 'تاريخ الإضافة']
+        # إضافة رؤوس الأعمدة
+        headers = ['اللقب', 'الاسم', 'سنة الميلاد', 'البلد', 'المهنة', 'سنة الوفاة', 'مكان الوفاة', 'تاريخ الإضافة']
+        ws.append(headers)
         
+        # إضافة البيانات
+        for person in results:
+            row = [
+                person.get('last_name', ''),
+                person.get('first_name', ''),
+                person.get('birth_year', ''),
+                person.get('country', ''),
+                person.get('job', ''),
+                person.get('death_year', ''),
+                person.get('death_place', ''),
+                person.get('created_at', '')
+            ]
+            ws.append(row)
+        
+        # حفظ الملف
         filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        df.to_excel(filename, index=False, engine='openpyxl')
+        wb.save(filename)
         
+        # إرسال الملف
         file = types.FSInputFile(filename)
-        await message.answer_document(
-            file,
-            caption=f"📊 **تصدير البيانات**\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n📈 عدد السجلات: {len(df)}",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        await message.answer_document(file, caption=f"📊 تصدير {len(results)} سجل")
         
     except Exception as e:
-        logger.error(f"خطأ في التصدير: {e}")
-        await message.answer("❌ **حدث خطأ أثناء التصدير**\nيرجى المحاولة لاحقاً.", parse_mode=ParseMode.MARKDOWN)
+        await message.answer(f"❌ خطأ: {str(e)[:100]}")
 
 # =============== المعالج العام للنصوص ===============
 @dp.message(F.text & ~F.text.startswith('/'))
